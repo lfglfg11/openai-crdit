@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>API Key额度及模型查询</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        h3 {
+            margin-top: 20px;
+            color: #2c3e50;
+        }
+        input[type="text"], textarea {
+            width: 50%;
+            padding: 8px;
+            margin: 5px auto; /* 使用 auto 实现水平居中 */
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            display: block; /* 确保元素为块级，以便居中生效 */
+        }
+
+        textarea {
+            height: 68px; /* 减小高度 */
+            resize: vertical; /* 允许用户垂直调整大小 */
+        }
+
+        label {
+            display: block;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        button {
+            display: block;
+            width: 200px;
+            padding: 10px;
+            margin: 20px auto;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        .model-category {
+            margin-top: 10px;
+        }
+        .model-category h3 {
+            text-align: left;
+        }
+        .model-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .model-item {
+            background-color: #e7f2fa;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-bottom: 2px;
+        }
+        .model-item:hover {
+            background-color: #d0e5f5;
+        }
+        #copyNotification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+        }
+        
+    </style>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>API Key额度及模型查询</h1>
+        <label for="urlInput">API请求URL(格式:https://api.openai.com):</label>
+        <!-- <input type="text" id="urlInput" value="https://api.xbyjs.top" placeholder="https://api.openai.com"> -->
+        <input type="text" id="urlInput" value="https://api.xbyjs.top" placeholder="https://api.openai.com" readonly>
+        <label for="apiKeyInput">API密钥(多个密钥请用回车分隔):</label>
+        <textarea id="apiKeyInput" placeholder="请输入你的API Key，多个密钥请用回车分隔"></textarea>
+        <button id="queryBtn">查询余额和模型列表</button>
+        <div id="result"></div>
+        <div id="modelList"></div>
+    </div>
+    <div id="copyNotification">已复制到剪贴板</div>
+
+    <script>
+        $(document).ready(function() {
+            // 页面加载时，从 localStorage 读取保存的值
+            $('#urlInput').val(localStorage.getItem('apiUrl') || 'https://api.xbyjs.top');
+            $('#apiKeyInput').val(localStorage.getItem('apiKeys') || '');
+
+            // 当输入框内容改变时，保存到 localStorage
+            $('#urlInput, #apiKeyInput').on('input', function() {
+                localStorage.setItem('apiUrl', $('#urlInput').val());
+                localStorage.setItem('apiKeys', $('#apiKeyInput').val());
+            });
+            
+            $('#queryBtn').click(function() {
+                var apiKeys = $('#apiKeyInput').val().split('\n').filter(key => key.trim() !== '');
+                var baseUrl = $('#urlInput').val();
+
+                var resultHtml = "<h2>余额查询结果</h2>";
+                var promises = [];
+
+                apiKeys.forEach(function(apiKey, index) {
+                    var headers = {
+                        'Authorization': 'Bearer ' + apiKey.trim(),
+                        'Content-Type': 'application/json'
+                    };
+
+                    if (baseUrl === 'https://api.siliconflow.cn') {
+                        promises.push(querySiliconFlowBalance(baseUrl, headers, index + 1));
+                    } else {
+                        promises.push(queryOpenAIBalance(baseUrl, headers, index + 1));
+                    }
+                });
+
+                Promise.all(promises).then(function(results) {
+                    resultHtml += results.join('');
+                    $('#result').html(resultHtml);
+                });
+
+                // 查询模型列表（使用第一个API密钥）
+                if (apiKeys.length > 0) {
+                    var headers = {
+                        'Authorization': 'Bearer ' + apiKeys[0].trim(),
+                        'Content-Type': 'application/json'
+                    };
+                    queryModelList(baseUrl, headers);
+                }
+            });
+
+            function querySiliconFlowBalance(baseUrl, headers, keyIndex) {
+                return new Promise(function(resolve, reject) {
+                    $.ajax({
+                        url: baseUrl + "/v1/user/info",
+                        headers: headers,
+                        method: 'GET',
+                        success: function(response) {
+                            if (response.status && response.data) {
+                                var data = response.data;
+                                var resultHtml = "<h3>API密钥 #" + keyIndex + " (硅基流动)</h3>" +
+                                    "<table>" +
+                                    "<tr>" +
+                                    "<th>用户ID</th>" +
+                                    "<th>用户名</th>" +
+                                    "<th>邮箱</th>" +
+                                    "<th>余额(美元)</th>" +
+                                    "<th>充值余额(美元)</th>" +
+                                    "<th>总余额(美元)</th>" +
+                                    "</tr>" +
+                                    "<tr>" +
+                                    "<td>" + data.id + "</td>" +
+                                    "<td>" + data.name + "</td>" +
+                                    "<td>" + data.email + "</td>" +
+                                    "<td>" + data.balance + "</td>" +
+                                    "<td>" + data.chargeBalance + "</td>" +
+                                    "<td>" + data.totalBalance + "</td>" +
+                                    "</tr>" +
+                                    "</table>";
+                                resolve(resultHtml);
+                            } else {
+                                resolve("<p>API密钥 #" + keyIndex + " 余额查询失败：" + response.message + "</p>");
+                            }
+                        },
+                        error: function(error) {
+                            resolve("<p>API密钥 #" + keyIndex + " 余额查询出错：" + error.statusText + "</p>");
+                        }
+                    });
+                });
+            }
+
+            function queryOpenAIBalance(baseUrl, headers, keyIndex) {
+                var today = new Date();
+                var startDate = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+                var endDate = today.toISOString().split('T')[0];
+
+                return new Promise(function(resolve, reject) {
+                    $.when(
+                        $.ajax({
+                            url: baseUrl + "/v1/dashboard/billing/subscription",
+                            headers: headers,
+                            method: 'GET'
+                        }),
+                        $.ajax({
+                            url: baseUrl + "/v1/dashboard/billing/usage?start_date=" + startDate + "&end_date=" + endDate,
+                            headers: headers,
+                            method: 'GET'
+                        })
+                    ).then(function(subscriptionData, usageData) {
+                        var accountBalance = subscriptionData[0].soft_limit_usd;
+                        var usedBalance = usageData[0].total_usage / 100;
+                        var remainingBalance = accountBalance - usedBalance;
+
+                        var resultHtml = "<h3>API密钥 #" + keyIndex + " (OpenAI)</h3>" +
+                            "<table>" +
+                            "<tr>" +
+                            "<th>是否已绑定支付方式</th>" +
+                            "<th>账户额度(美元)</th>" +
+                            "<th>已使用额度(美元)</th>" +
+                            "<th>剩余额度(美元)</th>" +
+                            "<th>API访问权限截止时间</th>" +
+                            "</tr>" +
+                            "<tr>" +
+                            "<td>" + (subscriptionData[0].has_payment_method ? "是" : "否") + "</td>" +
+                            "<td>" + accountBalance.toFixed(2) + "</td>" +
+                            "<td>" + usedBalance.toFixed(2) + "</td>" +
+                            "<td>" + remainingBalance.toFixed(2) + "</td>" +
+                            "<td>" + (subscriptionData[0].access_until ? new Date(subscriptionData[0].access_until * 1000).toLocaleString() : "无限制") + "</td>" +
+                            "</tr>" +
+                            "</table>";
+                        
+                        resolve(resultHtml);
+                    }).fail(function(error) {
+                        resolve("<p>API密钥 #" + keyIndex + " 查询出错：" + error.statusText + "</p>");
+                    });
+                });
+            }
+
+
+            function queryModelList(baseUrl, headers) {
+                $.ajax({
+                    url: baseUrl + "/v1/models",
+                    headers: headers,
+                    method: 'GET',
+                    success: function(response) {
+                        var modelCategories = {
+                            'OpenAI': [],
+                            'Claude': [],
+                            'Google': [],
+                            '零一万物': [],
+                            '千问': [],
+                            '智谱模型': [],
+                            'BAAI': [],
+                            'DeepSeek': [],
+                            'InternLM': [],
+                            'Moonshot': [],
+                            'Llama': [],
+                            'Mistral': [],
+                            '向量模型': [],
+                            'Other': []
+                        };
+
+                        response.data.forEach(function(model) {
+                            var id = model.id.toLowerCase();
+                            if (id.includes('gpt') || id.includes('o1') || id.includes('tts')) {
+                                modelCategories['OpenAI'].push(model.id);
+                            } else if (id.includes('claude') || id.includes('anthropic')) {
+                                modelCategories['Claude'].push(model.id);
+                            } else if (id.includes('gemma') || id.includes('gemini')) {
+                                modelCategories['Google'].push(model.id);
+                            } else if (id.includes('yi-')) {
+                                modelCategories['零一万物'].push(model.id);
+                            } else if (id.includes('qwen')) {
+                                modelCategories['千问'].push(model.id);
+                            } else if (id.includes('glm')) {
+                                modelCategories['智谱模型'].push(model.id);
+                            } else if (id.includes('baai')) {
+                                modelCategories['BAAI'].push(model.id);
+                            } else if (id.includes('deepseek')) {
+                                modelCategories['DeepSeek'].push(model.id);
+                            } else if (id.includes('internlm')) {
+                                modelCategories['InternLM'].push(model.id);
+                            } else if (id.includes('moonshot') || id.includes('kimi')) {
+                                modelCategories['Moonshot'].push(model.id);
+                            } else if (id.includes('llama')) {
+                                modelCategories['Llama'].push(model.id);
+                            } else if (id.includes('mistral')) {
+                                modelCategories['Mistral'].push(model.id);
+                            } else if (id.includes('embedding')) {
+                                modelCategories['向量模型'].push(model.id);
+                            } else {
+                                modelCategories['Other'].push(model.id);
+                            }
+                        });
+
+                        var modelListHtml = "<h2>支持的模型列表（第一个key为准）</h2>";
+                        for (var category in modelCategories) {
+                            if (modelCategories[category].length > 0) {
+                                modelListHtml += "<div class='model-category'><h3>" + category + "</h3><div class='model-list'>";
+                                modelCategories[category].forEach(function(model) {
+                                    modelListHtml += "<span class='model-item' data-model='" + model + "'>" + model + "</span>";
+                                });
+                                modelListHtml += "</div></div>";
+                            }
+                        }
+                        $('#modelList').html(modelListHtml);
+
+                        // 为模型名称添加点击事件
+                        $('.model-item').click(function() {
+                            var modelName = $(this).data('model');
+                            navigator.clipboard.writeText(modelName).then(function() {
+                                showNotification();
+                            });
+                        });
+                    },
+                    error: function(error) {
+                        $('#modelList').html("<p>模型列表查询出错：" + error.statusText + "</p>");
+                    }
+                });
+            }
+
+            function showNotification() {
+                $('#copyNotification').fadeIn().delay(2000).fadeOut();
+            }
+        });
+    </script>
+</body>
+</html>
